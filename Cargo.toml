@@ -1,0 +1,27 @@
+[package]
+name = "hust_news_entry"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+reqwest = "0.11.11"
+serde_yaml = "0.9.10"
+lazy_static = "1.4.0"
+log = "0.4.17"
+pretty_env_logger = "0.4.0"
+scraper = "0.13.0"
+crossterm = "0.25.0"
+
+[dependencies.serde]
+version = "1.0.144"
+features = ["derive"]
+
+[dependencies.tokio]
+version = "1.21.0"
+features = ["full"]
+
+[dependencies.ctrlc]
+version = "3.0"
+features = ["termination"]
