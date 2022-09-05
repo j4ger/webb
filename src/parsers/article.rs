@@ -1,6 +1,6 @@
-use crate::{log_expect::LogExpect, Error, SuccessTarget};
-use log::{info, warn};
-use scraper::{ElementRef, Html, Selector};
+use crate::{Error, SuccessTarget};
+use log::info;
+use scraper::{Html, Selector};
 // parse article, returns the actual article
 pub fn parse_article(content: String, url: &str) -> Result<SuccessTarget, Error> {
     let structure = Html::parse_document(&content);

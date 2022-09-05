@@ -1,18 +1,16 @@
-const TARGETS: [&str; 6] = [
+const TARGETS: [&str; 5] = [
     "华中工学院",
     "华中科技大学",
     "华中理工大学",
     "同济",
     "武汉医学院",
-    "黑蛇",
 ];
-const THROTTLE: usize = 8;
+pub const THROTTLE: usize = 2;
 const ROOT: &str = "https://cn.govopendata.com";
 
 use lazy_static::lazy_static;
 use log::{info, trace, warn};
-use std::sync::{atomic::AtomicU64, atomic::Ordering, mpsc::channel, Arc, Mutex};
-use tokio::sync::{OwnedSemaphorePermit, Semaphore};
+use std::sync::{atomic::AtomicU64, atomic::Ordering, mpsc::channel, Mutex};
 
 mod log_expect;
 use log_expect::LogExpect;
@@ -21,7 +19,7 @@ mod file_source;
 use file_source::FileSource;
 
 mod fetch;
-use fetch::fetch;
+use fetch::FetchClient;
 
 mod parsers;
 use parsers::*;
@@ -36,6 +34,7 @@ lazy_static! {
     static ref SUCCESSLIST: Mutex<Vec<SuccessTarget>> = Mutex::new(Vec::new());
     static ref FAILLIST: Mutex<Vec<FailTarget>> = Mutex::new(Vec::new());
     static ref JOBMANAGER: Mutex<JobManager> = Mutex::new(JobManager::new());
+    static ref FETCHCLIENT: FetchClient = FetchClient::new(THROTTLE);
 }
 
 fn main() {
@@ -48,8 +47,6 @@ fn main() {
         let mut lock = JOBMANAGER.lock().log_expect("Failed to aquire lock.");
         lock.init(tx_clone);
     }
-
-    let throttler = Arc::new(Semaphore::new(THROTTLE));
 
     ctrlc::set_handler(move || {
         info!("Received Ctrl-C event.");
@@ -66,7 +63,6 @@ fn main() {
 
     runtime.spawn(index_task(
         "https://cn.govopendata.com/renminribao/".to_string(),
-        Arc::clone(&throttler),
     ));
 
     info!("Waiting for Ctrl-C.");
@@ -129,8 +125,8 @@ pub enum Error {
 }
 
 // dispatch year tasks
-async fn index_task(url: String, semaphore: Arc<Semaphore>) {
-    match fetch(&url).await {
+async fn index_task(url: String) {
+    match FETCHCLIENT.fetch(&url).await {
         Ok(content) => match parse_index_page(content) {
             Ok(years) => {
                 for year in years {
@@ -140,11 +136,7 @@ async fn index_task(url: String, semaphore: Arc<Semaphore>) {
                         lock.allocate();
                     }
 
-                    let permit = (Arc::clone(&semaphore))
-                        .acquire_owned()
-                        .await
-                        .log_expect("Failed to aquire permit.");
-                    tokio::spawn(year_task(year, semaphore.clone(), permit));
+                    tokio::spawn(year_task(year));
                 }
                 {
                     let mut lock = JOBMANAGER.lock().log_expect("Failed to aquire lock.");
@@ -175,8 +167,8 @@ async fn index_task(url: String, semaphore: Arc<Semaphore>) {
 }
 
 // dispatch month tasks
-async fn year_task(url: String, semaphore: Arc<Semaphore>, _permit: OwnedSemaphorePermit) {
-    match fetch(&url).await {
+async fn year_task(url: String) {
+    match FETCHCLIENT.fetch(&url).await {
         Ok(content) => match parse_year_page(content) {
             Ok(months) => {
                 for month in months {
@@ -186,12 +178,7 @@ async fn year_task(url: String, semaphore: Arc<Semaphore>, _permit: OwnedSemapho
                         lock.allocate();
                     }
 
-                    let permit = (Arc::clone(&semaphore))
-                        .acquire_owned()
-                        .await
-                        .log_expect("Failed to aquire permit.");
-
-                    tokio::spawn(month_task(month, semaphore.clone(), permit));
+                    tokio::spawn(month_task(month));
                 }
                 {
                     let mut lock = JOBMANAGER.lock().log_expect("Failed to aquire lock.");
@@ -222,8 +209,8 @@ async fn year_task(url: String, semaphore: Arc<Semaphore>, _permit: OwnedSemapho
 }
 
 // dispatch day tasks
-async fn month_task(url: String, semaphore: Arc<Semaphore>, _permit: OwnedSemaphorePermit) {
-    match fetch(&url).await {
+async fn month_task(url: String) {
+    match FETCHCLIENT.fetch(&url).await {
         Ok(content) => match parse_month_page(content) {
             Ok(days) => {
                 for day in days {
@@ -233,12 +220,7 @@ async fn month_task(url: String, semaphore: Arc<Semaphore>, _permit: OwnedSemaph
                         lock.allocate();
                     }
 
-                    let permit = (Arc::clone(&semaphore))
-                        .acquire_owned()
-                        .await
-                        .log_expect("Failed to aquire permit.");
-
-                    tokio::spawn(day_task(day, semaphore.clone(), permit));
+                    tokio::spawn(day_task(day));
                 }
                 {
                     let mut lock = JOBMANAGER.lock().log_expect("Failed to aquire lock.");
@@ -269,8 +251,8 @@ async fn month_task(url: String, semaphore: Arc<Semaphore>, _permit: OwnedSemaph
 }
 
 // dispatch article tasks
-async fn day_task(url: String, semaphore: Arc<Semaphore>, _permit: OwnedSemaphorePermit) {
-    match fetch(&url).await {
+async fn day_task(url: String) {
+    match FETCHCLIENT.fetch(&url).await {
         Ok(content) => match parse_day_page(content) {
             Ok(articles) => {
                 for article in articles {
@@ -279,12 +261,7 @@ async fn day_task(url: String, semaphore: Arc<Semaphore>, _permit: OwnedSemaphor
                         let mut lock = JOBMANAGER.lock().log_expect("Failed to aquire lock.");
                         lock.allocate();
                     }
-                    let permit = (Arc::clone(&semaphore))
-                        .acquire_owned()
-                        .await
-                        .log_expect("Failed to aquire permit.");
-
-                    tokio::spawn(article_task(article, permit));
+                    tokio::spawn(article_task(article));
                 }
                 {
                     let mut lock = JOBMANAGER.lock().log_expect("Failed to aquire lock.");
@@ -315,12 +292,12 @@ async fn day_task(url: String, semaphore: Arc<Semaphore>, _permit: OwnedSemaphor
 }
 
 // examine the article, test for keyword presence, save target to file
-async fn article_task(url: String, _permit: OwnedSemaphorePermit) {
-    let current_count = COUNT.fetch_add(1, Ordering::Relaxed);
-    trace!("Processing article {}.", current_count);
-    match fetch(&url).await {
+async fn article_task(url: String) {
+    trace!("Processing article {}.", url);
+    match FETCHCLIENT.fetch(&url).await {
         Ok(content) => match parse_article(content, &url) {
             Ok(target) => {
+                info!("{}", target.article);
                 for each in TARGETS {
                     if target.article.contains(each) {
                         info!(
@@ -334,6 +311,7 @@ async fn article_task(url: String, _permit: OwnedSemaphorePermit) {
                                 .log_expect("[article] Failed to aquire lock.");
                             lock.push(target);
                         }
+                        COUNT.fetch_add(1, Ordering::Relaxed);
                         break;
                     }
                 }
@@ -351,6 +329,7 @@ async fn article_task(url: String, _permit: OwnedSemaphorePermit) {
             warn!("[article] Fetching {} failed: {:?}.", url, error);
         }
     }
+    COUNT.fetch_add(1, Ordering::Relaxed);
     {
         let mut lock = FAILLIST
             .lock()
