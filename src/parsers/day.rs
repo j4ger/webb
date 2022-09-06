@@ -1,7 +1,7 @@
-use crate::{Error, ROOT};
+use crate::{Error, SuccessTarget, ROOT};
 use scraper::{Html, Selector};
 // parse article urls
-pub fn parse_day_page(content: String) -> Result<Vec<String>, Error> {
+pub fn parse_day_page(content: String) -> Result<Vec<SuccessTarget>, Error> {
     let mut results = Vec::new();
 
     let structure = Html::parse_document(&content);
@@ -16,14 +16,16 @@ pub fn parse_day_page(content: String) -> Result<Vec<String>, Error> {
             .select(&a_selector)
             .next()
             .ok_or(Error::ParsingError("link".to_string()))?;
-        results.push(format!(
+        let url = format!(
             "{}{}",
             ROOT,
             link.value()
                 .attr("href")
                 .ok_or(Error::ParsingError("link href".to_string()))?
                 .to_string(),
-        ));
+        );
+        let title = link.text().collect::<String>();
+        results.push(SuccessTarget { title, url });
     }
 
     Ok(results)

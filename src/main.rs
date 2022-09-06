@@ -99,7 +99,6 @@ fn main() {
 pub struct SuccessTarget {
     title: String,
     url: String,
-    article: String,
 }
 
 #[derive(serde::Serialize, Debug)]
@@ -251,7 +250,7 @@ async fn month_task(url: String) {
 }
 
 // dispatch article tasks
-async fn day_task(url: String) {
+/* async fn day_task(url: String) {
     match FETCHCLIENT.fetch(&url).await {
         Ok(content) => match parse_day_page(content) {
             Ok(articles) => {
@@ -289,30 +288,35 @@ async fn day_task(url: String) {
         let mut lock = JOBMANAGER.lock().log_expect("Failed to aquire lock.");
         lock.deallocate();
     }
-}
+} */
 
 // examine the article, test for keyword presence, save target to file
-async fn article_task(url: String) {
-    trace!("Processing article {}.", url);
+async fn day_task(url: String) {
+    trace!("Processing day {}.", url);
     match FETCHCLIENT.fetch(&url).await {
-        Ok(content) => match parse_article(content, &url) {
-            Ok(target) => {
-                info!("{}", target.article);
-                for each in TARGETS {
-                    if target.article.contains(each) {
-                        info!(
-                            "[article] Found keyword {} in article {}.",
-                            each, &target.title
-                        );
-                        SUCCESSES.fetch_add(1, Ordering::Relaxed);
+        Ok(content) => match parse_day_page(content) {
+            Ok(targets) => {
+                for each_target in targets {
+                    COUNT.fetch_add(1, Ordering::Relaxed);
+                    for each in TARGETS {
+                        if each_target
+                            .title
+                            .replace(['\n', '\t', '\r', ' '], "")
+                            .contains(each)
                         {
-                            let mut lock = SUCCESSLIST
-                                .lock()
-                                .log_expect("[article] Failed to aquire lock.");
-                            lock.push(target);
+                            info!(
+                                "[article] Found keyword {} in article {}.",
+                                each, &each_target.title
+                            );
+                            SUCCESSES.fetch_add(1, Ordering::Relaxed);
+                            {
+                                let mut lock = SUCCESSLIST
+                                    .lock()
+                                    .log_expect("[article] Failed to aquire lock.");
+                                lock.push(each_target);
+                            }
+                            break;
                         }
-                        COUNT.fetch_add(1, Ordering::Relaxed);
-                        break;
                     }
                 }
                 {

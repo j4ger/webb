@@ -41,7 +41,6 @@ pub fn parse_article(content: String, url: &str) -> Result<SuccessTarget, Error>
         .collect::<String>();
 
     Ok(SuccessTarget {
-        article,
         url: url.to_string(),
         title: title.to_string(),
     })
